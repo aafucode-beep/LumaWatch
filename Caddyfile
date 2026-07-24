@@ -1,0 +1,18 @@
+# Caddy 反向代理：自动 HTTPS（Let's Encrypt），把全部流量转发到后端。
+# 后端（FastAPI）同时托管前端 SPA 静态资源与 /api 接口，故此处单一 upstream 即可。
+#
+# 部署前：在 shell 或 .env 中设置 DOMAIN，例如 DOMAIN=intel.example.com
+# 本地/无域名调试：DOMAIN 缺省为 localhost，Caddy 会签发本地自签证书。
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# 反代到 backend 容器
+	reverse_proxy backend:8000
+
+	# 访问日志（可选）
+	log {
+		output stdout
+		format console
+	}
+}

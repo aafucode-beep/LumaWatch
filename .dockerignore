@@ -1,0 +1,11 @@
+# 构建镜像时排除的目录/文件，缩小上下文、避免污染
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/*.pyc
+backend/data
+data
+.git
+*.md
+frontend/android
