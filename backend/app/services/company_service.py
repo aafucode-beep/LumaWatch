@@ -1,8 +1,10 @@
 """企业数据服务：草稿入库、多维筛选、分面统计。"""
 from __future__ import annotations
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from urllib.parse import urlsplit
+
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
 from .. import models
 
@@ -27,123 +29,222 @@ def get_or_create_tag(db: Session, name: str, dimension: str = "产品类型") -
 def set_company_tags(db: Session, company: models.Company, tag_ids: list[int]) -> None:
     company.tag_links.clear()
     db.flush()
-    for tid in dict.fromkeys(tag_ids):
-        if db.get(models.Tag, tid):
-            db.add(models.CompanyTag(company_id=company.id, tag_id=tid, source="manual"))
+    for tag_id in dict.fromkeys(tag_ids):
+        if db.get(models.Tag, tag_id):
+            db.add(models.CompanyTag(company_id=company.id, tag_id=tag_id, source="manual"))
 
 
 # ---------- 草稿入库 ----------
-def _add_product_lines(db: Session, company_id: int, items: list[dict], parent_id=None):
-    for order, it in enumerate(items or []):
-        name = (it.get("name") or "").strip()
+def _safe_int(value):
+    try:
+        return int(value) if value not in (None, "") else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _website_key(url: str | None) -> str:
+    if not url:
+        return ""
+    host = urlsplit(url).netloc.lower().split(":", 1)[0]
+    return host.removeprefix("www.")
+
+
+def _find_existing_company(db: Session, website: str | None) -> models.Company | None:
+    key = _website_key(website)
+    if not key:
+        return None
+    companies = db.scalars(
+        select(models.Company).where(models.Company.website.is_not(None))
+    ).all()
+    return next((company for company in companies if _website_key(company.website) == key), None)
+
+
+def _clear_company_intelligence(db: Session, company: models.Company) -> None:
+    company.offices.clear()
+    company.product_lines.clear()
+    company.downloads.clear()
+    company.news.clear()
+    company.projects.clear()
+    company.insights.clear()
+    company.tag_links.clear()
+    db.execute(
+        delete(models.SourceEvidence).where(
+            models.SourceEvidence.entity_type == "company",
+            models.SourceEvidence.entity_id == company.id,
+        )
+    )
+    db.flush()
+
+
+def _add_product_lines(
+    db: Session,
+    company_id: int,
+    items: list[dict],
+    parent_id: int | None = None,
+) -> None:
+    for order, item in enumerate(items or []):
+        name = str(item.get("name") or "").strip()
         if not name:
             continue
-        pl = models.ProductLine(
+        product_line = models.ProductLine(
             company_id=company_id,
             parent_id=parent_id,
             name=name[:255],
-            category=(it.get("category") or None),
-            description=(it.get("description") or None),
+            category=(item.get("category") or None),
+            description=(item.get("description") or None),
             sort_order=order,
         )
-        db.add(pl)
+        db.add(product_line)
         db.flush()
-        _add_product_lines(db, company_id, it.get("children") or [], pl.id)
+        if item.get("source_url"):
+            db.add(
+                models.SourceEvidence(
+                    entity_type="company",
+                    entity_id=company_id,
+                    field=f"product_line:{name}"[:64],
+                    source_url=str(item["source_url"])[:1024],
+                    snippet=(str(item.get("source_snippet"))[:300] if item.get("source_snippet") else None),
+                )
+            )
+        _add_product_lines(db, company_id, item.get("children") or [], product_line.id)
 
 
 def apply_draft(db: Session, draft: dict) -> models.Company:
-    """把（可能被人工编辑过的）AI 草稿写入数据库，状态置为 confirmed。"""
-    c = draft.get("company") or {}
-    company = models.Company(
-        name=(c.get("name") or "未命名企业")[:255],
-        name_cn=c.get("name_cn"),
-        website=c.get("website"),
-        logo_url=c.get("logo_url"),
-        hq_country=c.get("hq_country"),
-        hq_city=c.get("hq_city"),
-        founded_year=_safe_int(c.get("founded_year")),
-        history=c.get("history"),
-        philosophy=c.get("philosophy"),
-        summary=c.get("summary"),
-        is_key=bool(c.get("is_key", False)),
-        status="confirmed",
-    )
-    db.add(company)
+    """确认 AI 草稿；同一官网再次探测时更新原企业，避免重复记录。"""
+    company_data = draft.get("company") or {}
+    website = company_data.get("website") or draft.get("_source_url")
+    company = _find_existing_company(db, website)
+
+    if company:
+        preserved_is_key = company.is_key
+        _clear_company_intelligence(db, company)
+    else:
+        company = models.Company(name="未命名企业", status="confirmed")
+        db.add(company)
+        db.flush()
+        preserved_is_key = False
+
+    company.name = str(company_data.get("name") or "未命名企业")[:255]
+    company.name_cn = company_data.get("name_cn")
+    company.website = website
+    company.logo_url = company_data.get("logo_url")
+    company.hq_country = company_data.get("hq_country")
+    company.hq_city = company_data.get("hq_city")
+    company.founded_year = _safe_int(company_data.get("founded_year"))
+    company.history = company_data.get("history")
+    company.philosophy = company_data.get("philosophy")
+    company.summary = company_data.get("summary")
+    company.is_key = bool(company_data.get("is_key", preserved_is_key))
+    company.status = "confirmed"
     db.flush()
 
-    for o in draft.get("offices") or []:
+    for office in draft.get("offices") or []:
         db.add(
             models.CompanyOffice(
                 company_id=company.id,
-                region=o.get("region"),
-                country=o.get("country"),
-                city=o.get("city"),
-                office_type=o.get("office_type") or "office",
-                address=o.get("address"),
-                note=o.get("note"),
+                region=office.get("region"),
+                country=office.get("country"),
+                city=office.get("city"),
+                office_type=office.get("office_type") or "office",
+                address=office.get("address"),
+                note=office.get("note"),
             )
         )
 
-    _add_product_lines(db, company.id, draft.get("product_lines"))
+    _add_product_lines(db, company.id, draft.get("product_lines") or [])
 
-    for d in draft.get("downloads") or []:
-        if not d.get("url"):
+    for download in draft.get("downloads") or []:
+        if not download.get("url"):
             continue
         db.add(
             models.DownloadResource(
                 company_id=company.id,
-                title=(d.get("title") or d["url"])[:512],
-                url=d["url"][:1024],
-                resource_type=d.get("resource_type") or "other",
-                file_ext=d.get("file_ext"),
-                note=d.get("note"),
+                title=str(download.get("title") or download["url"])[:512],
+                url=str(download["url"])[:1024],
+                resource_type=download.get("resource_type") or "other",
+                file_ext=download.get("file_ext"),
+                note=download.get("note"),
             )
         )
 
-    for n in draft.get("news") or []:
-        if not n.get("url"):
+    for news_item in draft.get("news") or []:
+        if not news_item.get("url"):
             continue
         db.add(
             models.NewsLink(
                 company_id=company.id,
-                title=(n.get("title") or n["url"])[:512],
-                url=n["url"][:1024],
-                source=n.get("source"),
-                published_date=n.get("published_date"),
-                summary=n.get("summary"),
+                title=str(news_item.get("title") or news_item["url"])[:512],
+                url=str(news_item["url"])[:1024],
+                source=news_item.get("source"),
+                published_date=news_item.get("published_date"),
+                summary=news_item.get("summary"),
             )
         )
 
-    for t in draft.get("tags") or []:
-        name = t.get("name") if isinstance(t, dict) else str(t)
-        dim = t.get("dimension") if isinstance(t, dict) else "产品类型"
-        if not name:
+    for project in draft.get("projects") or []:
+        if not project.get("name"):
             continue
-        tag = get_or_create_tag(db, name, dim or "产品类型")
-        exists = db.scalar(
-            select(models.CompanyTag).where(
-                models.CompanyTag.company_id == company.id,
-                models.CompanyTag.tag_id == tag.id,
+        db.add(
+            models.ProjectCase(
+                company_id=company.id,
+                name=str(project["name"])[:512],
+                location=project.get("location"),
+                country=project.get("country"),
+                application=project.get("application"),
+                architect=project.get("architect"),
+                lighting_designer=project.get("lighting_designer"),
+                completion_year=_safe_int(project.get("completion_year")),
+                products=project.get("products"),
+                summary=project.get("summary"),
+                source_url=(str(project["source_url"])[:1024] if project.get("source_url") else None),
             )
         )
-        if not exists:
-            db.add(
-                models.CompanyTag(
-                    company_id=company.id, tag_id=tag.id, source="ai", confidence=0.8
-                )
+
+    for insight in draft.get("insights") or []:
+        if not insight.get("title") or not insight.get("summary"):
+            continue
+        db.add(
+            models.IntelligenceInsight(
+                company_id=company.id,
+                category=str(insight.get("category") or "其他")[:64],
+                title=str(insight["title"])[:255],
+                summary=str(insight["summary"]),
+                relevance=insight.get("relevance"),
+                source_url=(str(insight["source_url"])[:1024] if insight.get("source_url") else None),
             )
+        )
+
+    for evidence in draft.get("evidence") or []:
+        if not evidence.get("field") or not evidence.get("source_url"):
+            continue
+        db.add(
+            models.SourceEvidence(
+                entity_type="company",
+                entity_id=company.id,
+                field=str(evidence["field"])[:64],
+                source_url=str(evidence["source_url"])[:1024],
+                snippet=(str(evidence.get("snippet"))[:300] if evidence.get("snippet") else None),
+            )
+        )
+
+    for tag_item in draft.get("tags") or []:
+        name = tag_item.get("name") if isinstance(tag_item, dict) else str(tag_item)
+        dimension = tag_item.get("dimension") if isinstance(tag_item, dict) else "产品类型"
+        if not name:
+            continue
+        tag = get_or_create_tag(db, name, dimension or "产品类型")
+        db.add(
+            models.CompanyTag(
+                company_id=company.id,
+                tag_id=tag.id,
+                source="ai",
+                confidence=0.8,
+            )
+        )
 
     db.commit()
     db.refresh(company)
     return company
-
-
-def _safe_int(v):
-    try:
-        return int(v) if v not in (None, "") else None
-    except (ValueError, TypeError):
-        return None
-
 
 # ---------- 多维筛选 ----------
 def filter_company_ids(

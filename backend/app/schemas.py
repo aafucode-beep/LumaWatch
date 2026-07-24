@@ -104,6 +104,42 @@ class NewsOut(ORMModel, NewsBase):
     id: int
 
 
+# ---------- Project / Intelligence / Evidence ----------
+class ProjectCaseBase(BaseModel):
+    name: str
+    location: Optional[str] = None
+    country: Optional[str] = None
+    application: Optional[str] = None
+    architect: Optional[str] = None
+    lighting_designer: Optional[str] = None
+    completion_year: Optional[int] = None
+    products: Optional[str] = None
+    summary: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+class ProjectCaseOut(ORMModel, ProjectCaseBase):
+    id: int
+
+
+class IntelligenceInsightBase(BaseModel):
+    category: str = "其他"
+    title: str
+    summary: str
+    relevance: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+class IntelligenceInsightOut(ORMModel, IntelligenceInsightBase):
+    id: int
+
+
+class SourceEvidenceOut(ORMModel):
+    id: int
+    field: str
+    source_url: Optional[str] = None
+    snippet: Optional[str] = None
+
 # ---------- Company ----------
 class CompanyBase(BaseModel):
     name: str
@@ -141,6 +177,9 @@ class CompanyDetail(ORMModel, CompanyBase):
     product_lines: list[ProductLineOut] = []
     downloads: list[DownloadOut] = []
     news: list[NewsOut] = []
+    projects: list[ProjectCaseOut] = []
+    insights: list[IntelligenceInsightOut] = []
+    evidence: list[SourceEvidenceOut] = []
     tags: list[TagOut] = []
 
 

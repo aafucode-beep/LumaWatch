@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     crawl_delay: float = 1.5
     crawl_respect_robots: bool = True
     crawl_use_playwright: bool = True
+    playwright_browsers_path: str = ""
     crawl_user_agent: str = "LightingIntelBot/1.0 (+personal research)"
 
     # CORS

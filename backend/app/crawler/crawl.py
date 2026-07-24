@@ -1,7 +1,8 @@
-"""探测编排：给定入口 URL，抓取首页 + 关键页面，产出结构化抓取结果。"""
+"""探测编排：受控抓取首页和多层高价值页面，产出结构化结果。"""
 from __future__ import annotations
 
 import asyncio
+import heapq
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -33,61 +34,67 @@ class CrawlOutput:
 
     def combined_text(self, limit: int) -> str:
         chunks = []
-        for p in self.pages:
-            chunks.append(f"### 页面[{p.category}] {p.title}\nURL: {p.url}\n{p.text}")
-        text = "\n\n".join(chunks)
-        return text[:limit]
+        for page in self.pages:
+            chunks.append(
+                f"### 页面[{page.category}] {page.title}\nURL: {page.url}\n{page.text}"
+            )
+        return "\n\n".join(chunks)[:limit]
 
 
 def _dedup(items: list[dict], key: str = "url") -> list[dict]:
     seen, out = set(), []
-    for it in items:
-        k = it.get(key)
-        if k and k not in seen:
-            seen.add(k)
-            out.append(it)
+    for item in items:
+        value = item.get(key)
+        if value and value not in seen:
+            seen.add(value)
+            out.append(item)
     return out
 
 
 async def _get_html(url: str, client: httpx.AsyncClient) -> FetchResult:
-    """先静态抓取；若疑似 JS 渲染（正文过短）且开启 Playwright，则渲染。"""
-    res = await fetch_static(url, client)
-    if res.ok and res.html:
-        text = cleaner.extract_main_text(res.html, url)
+    """静态抓取优先；正文过短时才使用 Playwright。"""
+    result = await fetch_static(url, client)
+    if result.ok and result.html:
+        text = cleaner.extract_main_text(result.html, url)
         if len(text) >= 400 or not settings.crawl_use_playwright:
-            return res
+            return result
     if settings.crawl_use_playwright:
         rendered = await fetch_rendered([url])
-        r = rendered.get(url)
-        if r and r.ok and r.html:
-            return r
-    return res
+        candidate = rendered.get(url)
+        if candidate and candidate.ok and candidate.html:
+            return candidate
+        if candidate and candidate.error:
+            static_error = result.error or f"HTTP {result.status}"
+            result.error = (
+                f"静态抓取失败（{static_error}）；"
+                f"浏览器渲染失败（{candidate.error}）"
+            )
+    return result
 
 
 async def crawl_site(home_url: str, progress: Optional[ProgressCb] = None) -> CrawlOutput:
-    def report(pct: int, msg: str):
+    def report(percent: int, message: str):
         if progress:
-            progress(pct, msg)
+            progress(percent, message)
 
     out = CrawlOutput(home_url=home_url, final_url=home_url)
     async with httpx.AsyncClient(
-        headers={"User-Agent": settings.crawl_user_agent}, follow_redirects=True
+        headers={"User-Agent": settings.crawl_user_agent},
+        follow_redirects=True,
     ) as client:
-        rp = await robots.load_robots(home_url, client)
-        if not robots.can_fetch(rp, home_url):
+        robot_parser = await robots.load_robots(home_url, client)
+        if not robots.can_fetch(robot_parser, home_url):
             out.errors.append("robots.txt 禁止抓取首页")
             report(100, "robots 禁止")
             return out
 
-        report(10, "抓取首页…")
+        report(8, "抓取首页…")
         home = await _get_html(home_url, client)
         if not home.ok or not home.html:
             out.errors.append(f"首页抓取失败: {home.error or home.status}")
             report(100, "首页抓取失败")
             return out
         out.final_url = home.final_url
-
-        # 首页正文
         out.pages.append(
             CrawledPage(
                 url=home.final_url,
@@ -97,44 +104,101 @@ async def crawl_site(home_url: str, progress: Optional[ProgressCb] = None) -> Cr
             )
         )
 
-        report(25, "分析站点链接…")
-        links = page_finder.discover(home.final_url, home.html)
-        out.download_links.extend(links.download_links)
-        out.news_links.extend(links.news_links)
+        report(15, "分析高价值页面…")
+        home_links = page_finder.discover(home.final_url, home.html)
+        out.download_links.extend(home_links.download_links)
+        out.news_links.extend(home_links.news_links)
 
-        to_crawl = page_finder.select_pages_to_crawl(
-            home.final_url, links, settings.crawl_max_pages
-        )
-        # 记录每个待抓 URL 的类别
-        url_category: dict[str, str] = {}
-        for cat, urls in links.key_pages.items():
-            for u in urls:
-                url_category.setdefault(u, cat)
+        priority_index = {
+            category: index for index, category in enumerate(page_finder.PAGE_PRIORITY)
+        }
+        queue: list[tuple[int, int, int, int, str, str]] = []
+        queued = {home.final_url}
+        crawled_final_urls = {home.final_url}
+        sequence = 0
 
-        total = max(1, len(to_crawl))
-        for i, u in enumerate(to_crawl):
-            if not robots.can_fetch(rp, u):
+        def enqueue(links: page_finder.SiteLinks, depth: int) -> None:
+            nonlocal sequence
+            for category in page_finder.PAGE_PRIORITY:
+                for url in links.key_pages.get(category, []):
+                    if url in queued:
+                        continue
+                    queued.add(url)
+                    sequence += 1
+                    detail_rank = (
+                        0
+                        if depth > 1 and category in {"products", "projects", "news"}
+                        else 1
+                    )
+                    heapq.heappush(
+                        queue,
+                        (
+                            priority_index.get(category, 99),
+                            detail_rank,
+                            depth,
+                            sequence,
+                            url,
+                            category,
+                        ),
+                    )
+
+        enqueue(home_links, 1)
+        target_pages = max(1, settings.crawl_max_pages)
+        category_limits = {
+            "about": 1,
+            "products": 3,
+            "projects": 3,
+            "applications": 1,
+            "downloads": 1,
+            "technology": 1,
+            "sustainability": 1,
+            "news": 2,
+            "network": 1,
+            "history": 1,
+            "philosophy": 1,
+        }
+        category_counts: dict[str, int] = {}
+
+        while queue and len(out.pages) < target_pages:
+            _priority, _detail_rank, depth, _seq, url, category = heapq.heappop(queue)
+            if category_counts.get(category, 0) >= category_limits.get(category, 2):
                 continue
-            report(25 + int(60 * i / total), f"抓取 {url_category.get(u, 'page')} 页…")
+            if not robots.can_fetch(robot_parser, url):
+                out.errors.append(f"robots.txt 跳过: {url}")
+                continue
+
+            percent = 15 + int(68 * len(out.pages) / target_pages)
+            report(percent, f"抓取 {category} 页（{len(out.pages) + 1}/{target_pages}）…")
             await asyncio.sleep(settings.crawl_delay)
-            res = await _get_html(u, client)
-            if not res.ok or not res.html:
-                out.errors.append(f"抓取失败 {u}: {res.error or res.status}")
+            result = await _get_html(url, client)
+            if not result.ok or not result.html:
+                out.errors.append(f"抓取失败 {url}: {result.error or result.status}")
                 continue
-            out.pages.append(
-                CrawledPage(
-                    url=res.final_url,
-                    category=url_category.get(u, "page"),
-                    title=cleaner.page_title(res.html),
-                    text=cleaner.extract_main_text(res.html, res.final_url),
+            if result.final_url in crawled_final_urls:
+                continue
+            crawled_final_urls.add(result.final_url)
+
+            text = cleaner.extract_main_text(result.html, result.final_url)
+            if text:
+                category_counts[category] = category_counts.get(category, 0) + 1
+                out.pages.append(
+                    CrawledPage(
+                        url=result.final_url,
+                        category=category,
+                        title=cleaner.page_title(result.html),
+                        text=text,
+                    )
                 )
+
+            sub_links = page_finder.discover(
+                result.final_url, result.html, inherited_category=category
             )
-            # 从子页面继续发现下载/新闻链接
-            sub = page_finder.discover(res.final_url, res.html)
-            out.download_links.extend(sub.download_links)
-            out.news_links.extend(sub.news_links)
+            out.download_links.extend(sub_links.download_links)
+            out.news_links.extend(sub_links.news_links)
+            if depth < 3:
+                enqueue(sub_links, depth + 1)
 
         out.download_links = _dedup(out.download_links)
         out.news_links = _dedup(out.news_links)
-        report(90, "抓取完成")
+        report(88, f"抓取完成：{len(out.pages)} 个页面")
     return out

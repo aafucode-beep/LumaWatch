@@ -226,6 +226,9 @@ function DraftDrawer({ jobId, onClose }: { jobId: number; onClose: () => void })
           offices: draft.offices || [],
           downloads: draft.downloads || [],
           news: draft.news || [],
+          projects: draft.projects || [],
+          insights: draft.insights || [],
+          evidence: draft.evidence || [],
         },
         null,
         2,
@@ -265,13 +268,19 @@ function DraftDrawer({ jobId, onClose }: { jobId: number; onClose: () => void })
       offices: arrays.offices || [],
       downloads: arrays.downloads || [],
       news: arrays.news || [],
+      projects: arrays.projects || [],
+      insights: arrays.insights || [],
+      evidence: arrays.evidence || [],
     }
     confirmMut.mutate(payload)
   }
 
   const confirmed = job?.status === 'confirmed'
-  const dl = draft.downloads || []
-  const news = draft.news || []
+  const dl: any[] = Array.isArray(draft.downloads) ? draft.downloads : []
+  const news: any[] = Array.isArray(draft.news) ? draft.news : []
+  const projects: any[] = Array.isArray(draft.projects) ? draft.projects : []
+  const insights: any[] = Array.isArray(draft.insights) ? draft.insights : []
+  const evidence: any[] = Array.isArray(draft.evidence) ? draft.evidence : []
 
   return (
     <Drawer
@@ -351,10 +360,48 @@ function DraftDrawer({ jobId, onClose }: { jobId: number; onClose: () => void })
             </Form.Item>
           </Form>
 
+          <Card size="small" title={`关键情报（${insights.length}）`} style={{ marginBottom: 12 }}>
+            <List
+              size="small"
+              dataSource={insights}
+              locale={{ emptyText: '无' }}
+              renderItem={(item: any) => (
+                <List.Item>
+                  <div>
+                    <Space><AntTag color="geekblue">{item.category}</AntTag><Text strong>{item.title}</Text></Space>
+                    <div>{item.summary}</div>
+                    {item.relevance && <Text type="secondary">研究价值：{item.relevance}</Text>}
+                  </div>
+                </List.Item>
+              )}
+            />
+          </Card>
+          <Card size="small" title={`代表项目（${projects.length}）`} style={{ marginBottom: 12 }}>
+            <List
+              size="small"
+              dataSource={projects}
+              locale={{ emptyText: '无' }}
+              renderItem={(item: any) => (
+                <List.Item>
+                  <div><Text strong>{item.name}</Text>{item.summary && <div>{item.summary}</div>}</div>
+                </List.Item>
+              )}
+            />
+          </Card>
+          <Card size="small" title={`来源证据（${evidence.length}）`} style={{ marginBottom: 12 }}>
+            <List
+              size="small"
+              dataSource={evidence}
+              locale={{ emptyText: '无' }}
+              renderItem={(item: any) => (
+                <List.Item><div><Text strong>{item.field}</Text>{item.snippet && <div>“{item.snippet}”</div>}</div></List.Item>
+              )}
+            />
+          </Card>
           <Card size="small" title={`可下载资源（${dl.length}）`} style={{ marginBottom: 12 }}>
             <Table
               size="small"
-              rowKey={(_, i) => String(i)}
+              rowKey={(row) => row.url}
               pagination={false}
               dataSource={dl}
               columns={[
@@ -390,7 +437,7 @@ function DraftDrawer({ jobId, onClose }: { jobId: number; onClose: () => void })
           </Card>
 
           <Typography.Text type="secondary">
-            标签 / 产品线 / 机构 / 下载 / 新闻（可直接编辑 JSON 后入库）
+            标签 / 产品线 / 项目 / 洞察 / 证据 / 机构 / 下载 / 新闻（可直接编辑 JSON 后入库）
           </Typography.Text>
           <Input.TextArea
             value={rawArrays}

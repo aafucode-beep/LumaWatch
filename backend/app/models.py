@@ -66,6 +66,12 @@ class Company(Base):
     news: Mapped[list["NewsLink"]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
+    projects: Mapped[list["ProjectCase"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    insights: Mapped[list["IntelligenceInsight"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
     tag_links: Mapped[list["CompanyTag"]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
@@ -153,6 +159,46 @@ class NewsLink(Base):
 
     company: Mapped[Optional["Company"]] = relationship(back_populates="news")
 
+
+class ProjectCase(Base):
+    """官网公开的代表项目或应用案例。"""
+
+    __tablename__ = "project_case"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(512))
+    location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    application: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    architect: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    lighting_designer: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    completion_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    products: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+
+    company: Mapped["Company"] = relationship(back_populates="projects")
+
+
+class IntelligenceInsight(Base):
+    """面向研究和决策的关键信息，而非官网宣传文本的简单复述。"""
+
+    __tablename__ = "intelligence_insight"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), index=True
+    )
+    category: Mapped[str] = mapped_column(String(64), default="其他")
+    title: Mapped[str] = mapped_column(String(255))
+    summary: Mapped[str] = mapped_column(Text)
+    relevance: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+
+    company: Mapped["Company"] = relationship(back_populates="insights")
 
 class Tag(Base):
     """多维度标签。dimension 例：产品类型 / 应用场景 / 地区 / 企业属性。"""

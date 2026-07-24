@@ -39,7 +39,15 @@ const DIM_COLORS: Record<string, string> = {
 
 function plToTree(items: ProductLine[]): any[] {
   return items.map((p) => ({
-    title: p.category ? `${p.name}  ·  ${p.category}` : p.name,
+    title: (
+      <div>
+        <Text strong>{p.name}</Text>
+        {p.category && <AntTag style={{ marginLeft: 8 }}>{p.category}</AntTag>}
+        {p.description && (
+          <div><Text type="secondary">{p.description}</Text></div>
+        )}
+      </div>
+    ),
     key: p.id ?? p.name,
     children: p.children && p.children.length ? plToTree(p.children) : undefined,
   }))
@@ -170,6 +178,35 @@ export default function CompanyDetailPage() {
         )}
       </Card>
 
+      {company.insights.length > 0 && (
+        <Card size="small" title={`关键情报（${company.insights.length}）`} style={{ marginTop: 16 }}>
+          <List
+            dataSource={company.insights}
+            renderItem={(insight) => (
+              <List.Item>
+                <div style={{ width: '100%' }}>
+                  <Space>
+                    <AntTag color="geekblue">{insight.category}</AntTag>
+                    <Text strong>{insight.title}</Text>
+                  </Space>
+                  <Paragraph style={{ margin: '8px 0 4px' }}>{insight.summary}</Paragraph>
+                  {insight.relevance && (
+                    <Paragraph type="secondary" style={{ marginBottom: 4 }}>
+                      研究价值：{insight.relevance}
+                    </Paragraph>
+                  )}
+                  {insight.source_url && (
+                    <a href={insight.source_url} target="_blank" rel="noreferrer">
+                      <LinkOutlined /> 查看来源
+                    </a>
+                  )}
+                </div>
+              </List.Item>
+            )}
+          />
+        </Card>
+      )}
+
       <Row gutter={16} style={{ marginTop: 16 }}>
         <Col xs={24} lg={12}>
           <Card size="small" title="企业理念" style={{ marginBottom: 16 }}>
@@ -179,6 +216,35 @@ export default function CompanyDetailPage() {
             <Paragraph style={{ whiteSpace: 'pre-wrap' }}>
               {company.history || <Text type="secondary">暂无</Text>}
             </Paragraph>
+          </Card>
+          <Card size="small" title={`代表项目（${company.projects.length}）`} style={{ marginBottom: 16 }}>
+            {company.projects.length ? (
+              <List
+                size="small"
+                dataSource={company.projects}
+                renderItem={(project) => (
+                  <List.Item>
+                    <div style={{ width: '100%' }}>
+                      <Space wrap>
+                        <Text strong>{project.name}</Text>
+                        {project.application && <AntTag color="cyan">{project.application}</AntTag>}
+                        {project.completion_year && <Text type="secondary">{project.completion_year}</Text>}
+                      </Space>
+                      {(project.location || project.country) && (
+                        <div><Text type="secondary">{[project.country, project.location].filter(Boolean).join(' · ')}</Text></div>
+                      )}
+                      {project.summary && <Paragraph style={{ margin: '6px 0' }}>{project.summary}</Paragraph>}
+                      {project.products && <div><Text>涉及产品：{project.products}</Text></div>}
+                      {project.source_url && (
+                        <a href={project.source_url} target="_blank" rel="noreferrer"><LinkOutlined /> 来源</a>
+                      )}
+                    </div>
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Text type="secondary">暂无</Text>
+            )}
           </Card>
           <Card size="small" title="产品线架构">
             {company.product_lines.length ? (
@@ -239,15 +305,42 @@ export default function CompanyDetailPage() {
                 dataSource={company.news}
                 renderItem={(n) => (
                   <List.Item>
-                    <a href={n.url} target="_blank" rel="noreferrer">
-                      {n.title}
-                    </a>
-                    {n.published_date && <Text type="secondary"> · {n.published_date}</Text>}
+                    <div>
+                      <a href={n.url} target="_blank" rel="noreferrer">
+                        {n.title}
+                      </a>
+                      {n.published_date && <Text type="secondary"> · {n.published_date}</Text>}
+                      {n.summary && <div><Text type="secondary">{n.summary}</Text></div>}
+                    </div>
                   </List.Item>
                 )}
               />
             ) : (
               <Text type="secondary">暂无</Text>
+            )}
+          </Card>
+
+          <Card size="small" title={`来源证据（${company.evidence.length}）`} style={{ marginTop: 16 }}>
+            {company.evidence.length ? (
+              <List
+                size="small"
+                dataSource={company.evidence}
+                renderItem={(evidence) => (
+                  <List.Item>
+                    <div>
+                      <Text strong>{evidence.field}</Text>
+                      {evidence.snippet && (
+                        <Paragraph style={{ margin: '4px 0' }}>“{evidence.snippet}”</Paragraph>
+                      )}
+                      {evidence.source_url && (
+                        <a href={evidence.source_url} target="_blank" rel="noreferrer"><LinkOutlined /> 原始页面</a>
+                      )}
+                    </div>
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Text type="secondary">暂无可核验引用</Text>
             )}
           </Card>
         </Col>

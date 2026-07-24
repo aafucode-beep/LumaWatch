@@ -47,6 +47,35 @@ export interface NewsLink {
   company_id?: number | null
 }
 
+export interface ProjectCase {
+  id?: number
+  name: string
+  location?: string | null
+  country?: string | null
+  application?: string | null
+  architect?: string | null
+  lighting_designer?: string | null
+  completion_year?: number | null
+  products?: string | null
+  summary?: string | null
+  source_url?: string | null
+}
+
+export interface IntelligenceInsight {
+  id?: number
+  category: string
+  title: string
+  summary: string
+  relevance?: string | null
+  source_url?: string | null
+}
+
+export interface SourceEvidence {
+  id?: number
+  field: string
+  source_url?: string | null
+  snippet?: string | null
+}
 export interface CompanyListItem {
   id: number
   name: string
@@ -71,6 +100,9 @@ export interface CompanyDetail extends CompanyListItem {
   product_lines: ProductLine[]
   downloads: DownloadResource[]
   news: NewsLink[]
+  projects: ProjectCase[]
+  insights: IntelligenceInsight[]
+  evidence: SourceEvidence[]
 }
 
 export interface CompanyListResponse {

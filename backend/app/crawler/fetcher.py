@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urljoin, urlparse
@@ -47,6 +48,8 @@ async def fetch_static(url: str, client: httpx.AsyncClient) -> FetchResult:
 async def fetch_rendered(urls: list[str]) -> dict[str, FetchResult]:
     """用 Playwright 批量渲染。返回 url -> FetchResult。"""
     results: dict[str, FetchResult] = {}
+    if settings.playwright_browsers_path:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = settings.playwright_browsers_path
     try:
         from playwright.async_api import async_playwright
     except Exception as e:  # noqa: BLE001
@@ -63,7 +66,9 @@ async def fetch_rendered(urls: list[str]) -> dict[str, FetchResult]:
             page = await context.new_page()
             try:
                 resp = await page.goto(
-                    u, wait_until="networkidle", timeout=settings.crawl_timeout * 1000
+                    u,
+                    wait_until="domcontentloaded",
+                    timeout=settings.crawl_timeout * 1000,
                 )
                 await page.wait_for_timeout(800)
                 html = await page.content()

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
@@ -24,6 +24,8 @@ def _load_full(db: Session, company_id: int) -> models.Company | None:
             selectinload(models.Company.product_lines),
             selectinload(models.Company.downloads),
             selectinload(models.Company.news),
+            selectinload(models.Company.projects),
+            selectinload(models.Company.insights),
             selectinload(models.Company.tag_links).selectinload(models.CompanyTag.tag),
         )
     )
@@ -114,7 +116,15 @@ def get_company(company_id: int, db: Session = Depends(get_db)):
     company = _load_full(db, company_id)
     if not company:
         raise HTTPException(404, "企业不存在")
-    return _serialize.to_detail(company)
+    evidence = db.scalars(
+        select(models.SourceEvidence)
+        .where(
+            models.SourceEvidence.entity_type == "company",
+            models.SourceEvidence.entity_id == company.id,
+        )
+        .order_by(models.SourceEvidence.id)
+    ).all()
+    return _serialize.to_detail(company, evidence)
 
 
 @router.put("/{company_id}", response_model=schemas.CompanyDetail)
@@ -166,7 +176,13 @@ def update_company(
 
     db.commit()
     company = _load_full(db, company_id)
-    return _serialize.to_detail(company)
+    evidence = db.scalars(
+        select(models.SourceEvidence).where(
+            models.SourceEvidence.entity_type == "company",
+            models.SourceEvidence.entity_id == company_id,
+        )
+    ).all()
+    return _serialize.to_detail(company, evidence)
 
 
 @router.delete("/{company_id}")
@@ -174,6 +190,12 @@ def delete_company(company_id: int, db: Session = Depends(get_db)):
     company = db.get(models.Company, company_id)
     if not company:
         raise HTTPException(404, "企业不存在")
+    db.execute(
+        delete(models.SourceEvidence).where(
+            models.SourceEvidence.entity_type == "company",
+            models.SourceEvidence.entity_id == company_id,
+        )
+    )
     db.delete(company)
     db.commit()
     return {"ok": True}

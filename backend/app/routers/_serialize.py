@@ -59,7 +59,10 @@ def to_list_item(company: models.Company) -> schemas.CompanyListItem:
     )
 
 
-def to_detail(company: models.Company) -> schemas.CompanyDetail:
+def to_detail(
+    company: models.Company,
+    evidence: list[models.SourceEvidence] | None = None,
+) -> schemas.CompanyDetail:
     return schemas.CompanyDetail(
         id=company.id,
         name=company.name,
@@ -80,6 +83,9 @@ def to_detail(company: models.Company) -> schemas.CompanyDetail:
         product_lines=_build_pl_tree(company.product_lines),
         downloads=[schemas.DownloadOut.model_validate(d) for d in company.downloads],
         news=[schemas.NewsOut.model_validate(n) for n in company.news],
+        projects=[schemas.ProjectCaseOut.model_validate(p) for p in company.projects],
+        insights=[schemas.IntelligenceInsightOut.model_validate(i) for i in company.insights],
+        evidence=[schemas.SourceEvidenceOut.model_validate(e) for e in (evidence or [])],
         tags=company_tags(company),
     )
 
